@@ -3,6 +3,8 @@ nav:
   - Home: index.md
   - 工作:
     - OS: work/OS.md
+  - 学习笔记:
+    - 数据库: study/DB.md
   - About: 
     - A: about/about.md
     - B: about/b.md
