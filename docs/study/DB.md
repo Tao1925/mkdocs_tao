@@ -2,16 +2,190 @@
 ## 阶段一：数据库基础
 
 ### **Day 1：数据库基础概念与安装**
-**理论（1.5小时）**
-  - 数据库基本概念：数据库、表、字段、记录、数据类型（数值、字符串、日期等）。
-  there is my study
-  - 数据库管理系统（DBMS）的作用和分类（关系型 vs 非关系型）。
-  - 主键（Primary Key）、外键（Foreign Key）、索引（Index）的作用。
+**理论（1.5小时）**  
+1、 数据库基本概念：数据库、表、字段、记录、数据类型（数值、字符串、日期等）。  
 
-**实践（1.5小时）**
-  - 选择并安装一个数据库（推荐 **MySQL** 或 **PostgreSQL**）。
-  - 启动数据库服务，验证安装成功（通过命令行或图形化工具）。
-  - 尝试用命令行连接数据库（例如：`mysql -u root -p`）。
+#### 数据库(database)  
+**概念**: 数据库是一个结构化的数据集合，用于存储和管理数据。  
+
+**基本操作**  
+创建数据库 `CREATE DATABASES 数据库名;`  
+使用数据库 `USE DATABASES 数据库名;`  
+查看数据库 `SHOW DATABASES 数据库名;`  
+删除数据库 `DROP DATABASES 数据库名;`（操作不可逆！）  
+修改数据库  
+```sql
+ALTER DATABASE 数据库名 
+CHARACTER SET = utf8mb4 --字符集
+COLLATE = utf8mb4_unicode_ci; --排序方式
+```
+**QA**  
+Q: 为什么不能直接在表中放数据，要加一层数据库？  
+A: 相比直接在表中存数据，数据库提供了以下功能    
+
+* 数据组织：将数据按逻辑结构存储，便于管理和访问。  
+* 数据共享：多个应用程序可以同时访问同一个数据库。  
+* 数据一致性：通过约束（如主键、外键）保证数据的完整性和一致性。  
+* 数据安全：通过权限管理控制用户对数据的访问。  
+* 高效查询：通过索引和优化技术提高数据检索效率。  
+
+        
+
+
+#### 表(table)
+**概念**: 表是数据库中存储数据的基本单位，由 行（记录） 和 列（字段） 组成。  
+
+* 行(Row/Record)：表中的一条记录，表示一个实体的信息。  
+* 列(Column/Field)：表中的一个字段，表示实体的某个属性。  
+
+**基本操作**  
+
+创建表
+```sql
+CREATE TABLE 表名 (
+    列名1 数据类型 [约束条件],
+    列名2 数据类型 [约束条件],
+    ...
+    [表级约束条件]
+);
+示例:
+CREATE TABLE students (
+    id INT PRIMARY KEY AUTO_INCREMENT,  -- 主键，自增
+    name VARCHAR(50) NOT NULL,          -- 非空字符串
+    age INT,                            -- 整数
+    class VARCHAR(20)                   -- 字符串
+);
+```
+
+查看表结构  `DESC 表名;`  
+
+插入数据
+```sql
+INSERT INTO 表名 (列1, 列2, ...) 
+VALUES (值1, 值2, ...);
+示例:
+INSERT INTO students (name, age, class) 
+VALUES ('张三', 18, '高三(1)班');
+```
+
+查询数据
+```sql
+SELECT 列1, 列2, ... 
+FROM 表名 
+[WHERE 条件];
+示例:
+-- 查询所有学生的姓名和年龄
+SELECT name, age FROM students;
+-- 查询年龄大于 17 的学生
+SELECT * FROM students WHERE age > 17;
+```
+更新数据
+```sql
+UPDATE 表名 
+SET 列1 = 值1, 列2 = 值2, ... 
+[WHERE 条件];
+示例:
+UPDATE students 
+SET class = '高三(2)班' 
+WHERE name = '张三';
+```
+删除数据
+```sql
+DELETE FROM 表名 
+[WHERE 条件];
+示例:
+DELETE FROM students 
+WHERE age < 16;
+```
+
+
+
+2、 数据库管理系统（DBMS）的作用和分类（关系型 vs 非关系型）。  
+
+
+| 特性     | 关系型数据库（RDBMS）    | 非关系型数据库（NoSQL）         |
+|----------|--------------------------|---------------------------------|
+| 数据模型 | 表格形式（行和列）       | 键值对、文档、列族、图等形式    |
+| 查询语言 | SQL                      | 特定的 API 或查询语言           |
+| 事务支持 | 支持 ACID 事务           | 通常不支持 ACID，提供最终一致性 |
+| 扩展性   | 垂直扩展（增加硬件性能） | 水平扩展（增加节点）            |
+| 数据结构 | 固定，需要预先定义表结构 | 灵活，支持动态数据结构          |
+| 一致性   | 强一致性                 | 最终一致性                      |
+| 性能     | 适合复杂查询和事务操作   | 适合高并发和简单查询            |
+| 适用场景 | 金融、ERP、传统业务系统  | 大数据、实时推荐、社交网络      |
+
+
+3、 主键（Primary Key）、外键（Foreign Key）、索引（Index）的作用。  
+
+#### 主键
+**概念**: 是表中唯一标识一条记录的字段或字段组合。  
+
+**作用**:  
+
+* 唯一标识：确保每条记录的唯一性。
+* 加速查询：主键默认会创建索引，提高查询效率。
+* 数据完整性：防止插入重复数据或无效数据。
+
+**特性**:  
+
+* 唯一性：主键的值在表中必须是唯一的。
+* 非空性：主键的值不能为 NULL。
+* 不可修改：主键的值一旦确定，通常不建议修改。
+
+**用法**:
+```sql
+CREATE TABLE 表名 (
+    列名 数据类型 PRIMARY KEY,
+    ...
+);
+示例:
+-- 创建一个 `students` 表，`id` 列为主键
+CREATE TABLE students (
+    id INT PRIMARY KEY,  -- `id` 是主键
+    name VARCHAR(50),
+    age INT
+);
+```
+
+**复合主键**:
+```sql
+CREATE TABLE 表名 (
+    列1 数据类型,
+    列2 数据类型,
+    ...
+    PRIMARY KEY (列1, 列2)  -- 复合主键
+);
+示例:
+-- 创建一个 `enrollments` 表，`student_id` 和 `course_id` 组成复合主键
+CREATE TABLE enrollments (
+    student_id INT,
+    course_id INT,
+    enrollment_date DATE,
+    PRIMARY KEY (student_id, course_id)  -- 复合主键
+);
+```
+#### 外键
+
+**实践（1.5小时）**  
+
+* 选择并安装一个数据库（推荐 **MySQL** 或 **PostgreSQL**）。
+* 启动数据库服务，验证安装成功（通过命令行或图形化工具）。
+* 尝试用命令行连接数据库（例如：`mysql -u root -p`）。
+
+1、安装docker版本mysql
+安装docker[在ubuntu上安装docker](https://docs.docker.com/engine/install/ubuntu/)  
+拉取mysql的docker容器`sudo docker pull mysql:latest`
+运行容器并设置端口映射与自启动
+```sh
+docker run --name mysql-study \
+  -e MYSQL_ROOT_PASSWORD=secret_password \
+  -p 3306:3306 \
+  --restart=always \ 
+  -d mysql:latest
+```
+2、使用图形化工具连接mysql
+进入[navicat产品下载页面](https://www.navicat.com/en/products)，页面拉到最下，下载Navicat Premium Lite即可。
+
 
 ---
 
