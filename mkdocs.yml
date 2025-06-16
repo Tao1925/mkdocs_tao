@@ -5,6 +5,8 @@ nav:
     - OS: work/OS.md
   - 学习笔记:
     - 数据库: study/DB.md
+  - 培训:
+    - 51CTO: train/51CTO.md
   - About: 
     - A: about/about.md
     - B: about/b.md
