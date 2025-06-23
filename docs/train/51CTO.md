@@ -329,7 +329,7 @@ KEYS *	#列出所有Key（生产禁用！）	SCAN 0 MATCH user:*（安全遍历�
 BGSAVE	#后台触发 RDB 持久化
 ```
 
-<h2 id="Tomcat">Tomcat</h2> 
+<h2 id="Tomcat">Tomcat</h2>
 <h2 id="Tongweb">Tongweb</h2> 
 <h2 id="数据库基础">数据库基础</h2> 
 <h2 id="Oracle">Oracle</h2> 
@@ -340,6 +340,84 @@ BGSAVE	#后台触发 RDB 持久化
 <h2 id="主机安全">主机安全</h2> 
 <h2 id="终端管理">终端管理</h2> 
 <h2 id="Linux/Kylin">Linux/Kylin</h2> 
+1、linux文件目录
+
+| 目录 | 用途                         | 关键内容示例            |
+| ------ | ------------------------------ | ----------------------------- |
+| /      | 根目录，所有目录的起点 |                               |
+| /bin   | 基础命令（所有用户可用） | ls, cp, cat                   |
+| /sbin  | 系统管理命令（仅 root 可用） | fdisk, ifconfig, iptables     |
+| /etc   | 系统配置文件             | passwd, fstab, nginx.conf     |
+| /var   | 动态变化数据             | log/, lib/, www/              |
+| /tmp   | 临时文件（自动清理） |                               |
+| /home  | 普通用户家目录          | user1/, user2/                |
+| /root  | root 用户家目录           |                               |
+| /usr   | 用户程序与资源（只读） | bin/, lib/, include/          |
+| /opt   | 第三方软件安装目录    | google/chrome/                |
+| /dev   | 设备文件                   | sda, ttyS0, null              |
+| /proc  | 内核和进程信息（虚拟文件系统） | cpuinfo, meminfo, 1/（PID 1） |
+| /sys   | 系统硬件信息（虚拟文件系统） | class/, devices/              |
+| /boot  | 启动文件                   | vmlinuz, initramfs, grub/     |
+| /mnt   | 临时挂载点                |                               |
+| /media | 可移动设备挂载点       | cdrom/, usb/                  |
+2、重要配置文件
+```bash
+/etc/passwd       # 用户账户信息
+/etc/shadow       # 加密密码（仅root可读）
+/etc/group        # 用户组信息
+/etc/hosts        # 本地域名解析
+/etc/fstab        # 文件系统挂载配置
+/etc/resolv.conf  # DNS服务器配置
+```
+3、软件包管理
+```bash
+Debian/Ubuntu	
+apt install nginx	# 安装软件
+apt remove nginx	# 卸载软件
+apt update	# 更新软件源列表
+apt upgrade	# 升级所有软件
+RHEL/CentOS	
+yum install httpd	# 安装软件
+yum remove httpd	# 卸载软件
+yum update	# 升级所有软件
+通用	
+dpkg -i pkg.deb	# 手动安装Deb包
+rpm -ivh pkg.rpm	# 手动安装RPM包
+```
+4、服务管理
+```bash
+# 服务操作
+systemctl start nginx    # 启动服务
+systemctl stop nginx     # 停止服务
+systemctl restart nginx  # 重启服务
+systemctl reload nginx   # 重载配置（不中断）
+systemctl enable nginx   # 设置开机自启
+systemctl disable nginx  # 禁用开机自启
+
+# 服务状态查看
+systemctl status nginx   # 详细状态
+systemctl is-active nginx # 是否运行中
+journalctl -u nginx -f   # 实时查看日志
+```
+5、日志系统
+```mermaid
+graph LR
+A[应用程序] -->|syslog API| B(rsyslog)
+B --> C["/var/log/messages"]
+B --> D["/var/log/secure"]
+B --> E["/var/log/cron"]
+F[内核] -->|printk| G(klogd)
+G --> B
+H(auditd) --> I["/var/log/audit/audit.log"]
+```
+| 日志文件             | 记录内容                  |
+| ------------------------ | ----------------------------- |
+| /var/log/messages        | 常规系统消息（CentOS/RHEL） |
+| /var/log/syslog          | 常规系统消息（Debian/Ubuntu） |
+| /var/log/auth.log        | 认证日志（登录、sudo） |
+| /var/log/secure          | 安全日志（RHEL系）     |
+| /var/log/kern.log        | 内核日志                  |
+| /var/log/audit/audit.log | 审计日志（需auditd服务） |
 <h2 id="Windows">Windows</h2> 
 <h2 id="服务器基础">服务器基础</h2> 
 <h2 id="网络基础">网络基础</h2> 
