@@ -169,6 +169,8 @@ umask
 
 <h2 id="流程、运维、监控、配置平台">流程、运维、监控、配置平台</h2> 
 
+Prometheus+Granfa
+
 <h2 id="Nginx">Nginx</h2> 
 1、基础介绍
 
@@ -362,25 +364,251 @@ BGSAVE	#后台触发 RDB 持久化
 
 SQL
 
+| JOIN类型 | 是否保留未匹配数据 | 常见场景               |
+| ---------- | ------------------ | -------------------------- |
+| INNER JOIN | 否                | 精确匹配关联         |
+| LEFT JOIN  | 保留左表       | 主表附带可选信息   |
+| RIGHT JOIN | 保留右表       | 较少使用（可被左连接替代） |
+| FULL JOIN  | 保留双表       | 数据完整性检查      |
+| CROSS JOIN | 无关联条件    | 生成组合/测试数据  |
+
 DXL
+
+| 类型 | 典型命令         | 作用对象 | 是否自动提交 |
+| ---- | -------------------- | ---------- | ------------- |
+| DDL  | CREATE/ALTER/DROP    | 数据库结构 | ✅ 自动提交 |
+| DML  | INSERT/UPDATE/DELETE | 数据记录 | ❌ 需显式提交 |
+| DQL  | SELECT               | 数据查询 | 不涉及事务 |
+| DCL  | GRANT/REVOKE         | 访问权限 | ✅ 自动生效 |
+| TCL  | COMMIT/ROLLBACK      | 事务状态 | 控制DML执行 |
+
 
 sql优化
 
+```sql
+-- 为高频查询列建索引
+-- 优化前：全表扫描（耗时2s+）
+SELECT * FROM orders WHERE user_id = 1005;
+-- 优化后：创建索引（耗时0.01s）
+CREATE INDEX idx_user_id ON orders(user_id);
+
+-- 复合索引最左匹配原则
+-- 索引：idx_city_age(city, age)
+SELECT * FROM users WHERE city='北京' AND age>30; -- ✅ 命中索引
+SELECT * FROM users WHERE age>30;                -- ❌ 无法命中
+
+-- 覆盖索引减少回表
+-- 优化前：需回表查name
+SELECT name FROM products WHERE category='电子产品';
+-- 优化后：建立覆盖索引
+CREATE INDEX idx_category_name ON products(category, name);
+
+-- 避免SELECT *
+-- 坏实践：读取无用字段
+SELECT * FROM employees WHERE dept='IT';
+-- 好实践：仅取所需
+SELECT id, name FROM employees WHERE dept='IT';
+
+-- 用EXISTS替代IN（大数据集）
+-- 低效：IN导致全表扫描
+SELECT * FROM orders 
+WHERE product_id IN (SELECT id FROM products WHERE price>1000);
+-- 高效：EXISTS短路查询
+SELECT * FROM orders o 
+WHERE EXISTS (SELECT 1 FROM products p 
+             WHERE p.id=o.product_id AND p.price>1000);
+
+-- 分页优化：避免OFFSET大偏移
+-- 低效：偏移10万条（扫描10万+20行）
+SELECT * FROM logs ORDER BY id LIMIT 20 OFFSET 100000;
+-- 高效：记住上一页末尾ID
+SELECT * FROM logs WHERE id > 100000 ORDER BY id LIMIT 20;
+
+-- 小表驱动大表（JOIN优化）
+-- 低效：大表orders驱动小表users
+SELECT * FROM orders o JOIN users u ON o.user_id=u.id;
+-- 高效：小表驱动大表（尤其LEFT JOIN）
+SELECT * FROM users u LEFT JOIN orders o ON u.id=o.user_id;
+
+-- 数据类型优化
+-- 用INT而非VARCHAR存储ID（减少比较开销）
+-- 日期字段用DATETIME而非字符串
+
+-- 分区表应对海量数据
+-- 按月分区（OceanBase/GoldenDB均支持）
+CREATE TABLE logs (
+  id BIGINT,
+  log_time DATETIME
+) PARTITION BY RANGE (YEAR(log_time)*100 + MONTH(log_time)) (
+  PARTITION p202401 VALUES LESS THAN (202402),
+  PARTITION p202402 VALUES LESS THAN (202403)
+);
+
+-- 禁止在WHERE中对字段做运算
+-- 索引失效：无法使用create_time索引
+SELECT * FROM orders WHERE YEAR(create_time)=2024;
+-- 优化后：范围查询
+SELECT * FROM orders 
+WHERE create_time BETWEEN '2024-01-01' AND '2024-12-31';
+```
+
 索引
+
+数据库中的索引是加速数据检索的核心数据结构，相当于书籍的目录。它通过牺牲少量存储空间和写入性能，换取查询效率的指数级提升。
+
+```sql
+-- 创建索引
+CREATE INDEX idx_email ON users(email);
+
+-- 删除索引
+DROP INDEX idx_email ON users;
+
+-- 查看索引
+SHOW INDEX FROM users;
+
+-- 重建索引（解决碎片化）
+ALTER TABLE users REBUILD INDEX idx_name;
+```
 
 事务ACID
 
+| 特性                                 | 核心目标                                                | 实现机制 | 违反后果 |
+| -------------------------------------- | ----------------------------------------------------------- | -------- | -------- |
+| Atomicity  | 事务“要么全做，要么全不做” | - Undo Log（回滚日志）- 事务中任何一步失败自动回滚所有操作|部分更新导致数据逻辑矛盾                   |
+| Consistency |事务前后数据满足业务规则 | - 数据库约束（主键/唯一键/外键/CHECK）- 业务逻辑在事务中封装 |脏数据破坏业务完整性       |
+| Isolation  | 并发事务互不干扰   | - 锁机制（行锁/表锁）| 脏读/幻读/不可重复读    - MVCC（多版本并发控制）   |
+| Durability | 提交后数据永久保存 | - Redo Log（重做日志）- 事务提交后日志刷盘，即使宕机也能恢复|数据丢失造成业务中断          |
+
+| 问题                          | 现象                                                           | 示例                                                                  |
+| ------------------------------- | ---------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| 脏读(Dirty Read)              | 读到其他事务未提交的数据                             | 事务A读到事务B修改后未提交的余额，B回滚导致A读到“幽灵数据” |
+| 不可重复读(Non-Repeatable Read) | 同一事务内两次读取同一条数据，结果不一致（数据被其他事务修改） | 事务A第一次查余额1000，事务B扣减后提交，A再查变成900 |
+| 幻读(Phantom Read)            | 同一事务内两次查询同一条件，返回的行数不同（数据被其他事务增删） | 事务A查询年龄>30有10人，事务B插入1人后提交，A再查询变成11人 |
+| 丢失更新(Lost Update)       | 两个事务同时修改同一数据，后提交者覆盖前者的修改 | 事务A和B同时读余额1000，A存入100（1100），B取出200（800），最终余额错误 |
+
+| 隔离级别                 | 脏读 | 不可重复读 | 幻读 | 实现方式                 | 典型数据库默认级别 |
+| ---------------------------- | ---- | ---------- | ---- | ---------------------------- | ------------------ |
+| READ UNCOMMITTED（读未提交） | ❌  | ❌        | ❌  | 无锁，直接读内存最新数据 | 极少使用       |
+| READ COMMITTED               | ✅  | ❌        | ❌  | MVCC：每次读生成快照 | Oracle、SQL Server |
+| REPEATABLE READ（可重复读） | ✅  | ✅        | ❌  | MVCC：事务开始时生成全局快照 | MySQL（InnoDB）  |
+| SERIALIZABLE（串行化）  | ✅  | ✅        | ✅  | 读写均加锁（性能最低） |                    |
+
+
 缓存
+
+
+
 
 锁
 
+| 锁类型               | 冲突对象   | 适用场景           | SQL示例                     |
+| ----------------------- | -------------- | ---------------------- | ----------------------------- |
+| 共享锁 (S Lock)      | 独占锁(X)   | 读取数据（不修改） | SELECT ... LOCK IN SHARE MODE |
+| 独占锁 (X Lock)      | 共享锁/独占锁 | 修改数据（增删改） | SELECT ... FOR UPDATE         |
+| 意向锁 (Intention Lock) | 表级锁冲突检测 | 快速判断表中是否有行锁 | 自动管理                  |
+
+```mermaid
+graph TB
+    A[数据库] --> B[表级锁]
+    A --> C[页级锁]
+    A --> D[行级锁]
+    D --> E[记录锁 Record Lock]
+    D --> F[间隙锁 Gap Lock]
+    D --> G[临键锁 Next-Key Lock]
+```
+
+```sql
+-- 记录锁 (Record Lock)
+-- 锁定id=100的记录（索引项）
+SELECT * FROM users WHERE id=100 FOR UPDATE;
+
+-- 间隙锁 (Gap Lock)
+-- 锁定(20,30)区间，防止插入
+SELECT * FROM users WHERE age BETWEEN 20 AND 30 FOR UPDATE;
+
+-- 临键锁 (Next-Key Lock) = 记录锁 + 间隙锁
+```
+
+| 当前锁 → 请求锁 | X  | S  | IX | IS |
+| --------------- | -- | -- | -- | -- |
+| X (独占锁)   | ❌ | ❌ | ❌ | ❌ |
+| S (共享锁)   | ❌ | ✅ | ❌ | ✅ |
+| IX (意向独占锁) | ❌ | ❌ | ✅ | ✅ |
+| IS (意向共享锁) | ❌ | ✅ | ✅ | ✅ |
+
+```mermaid
+sequenceDiagram
+    事务A->>表1: 持有行1的X锁
+    事务B->>表2: 持有行2的X锁
+    事务A->>表2: 申请行2的X锁（阻塞）
+    事务B->>表1: 申请行1的X锁（死锁！）
+```
+```bash
+死锁处理策略
+# 死锁检测（默认）
+InnoDB：innodb_deadlock_detect=ON
+发现死锁后回滚代价最小的事务
+
+# 超时等待
+SET innodb_lock_wait_timeout=50; -- 等待50秒超时
+
+# 预防策略
+按固定顺序访问资源
+小事务尽快提交
+```
+
+```sql
+-- 锁监控命令
+-- MySQL
+SHOW ENGINE INNODB STATUS;  -- 查看LATEST DETECTED DEADLOCK
+SELECT * FROM information_schema.INNODB_TRX; -- 查看运行中事务
+
+-- Oracle
+SELECT * FROM v$locked_object;
+```
+
+| 问题现象   | 原因               | 解决方案                          |
+| -------------- | -------------------- | ------------------------------------- |
+| 锁等待超时 | 长事务阻塞      | 拆解事务，SET max_execution_time=5000 |
+| 死锁频发   | 跨表更新顺序不一致 | 统一按主键顺序更新           |
+| 行锁升级为表锁 | 无索引更新导致全表锁 | 为WHERE条件字段添加索引      |
+| 分布式锁冲突 | 跨节点事务竞争 | GoldenDB：避免热点分片   OceanBase：使用LOCAL索引      |
+
+表结构设计
+
+| 范式              | 核心要求           | 示例（反例→正解）                              | 优缺点                    |
+| ------------------- | ---------------------- | -------------------------------------------------------- | ---------------------------- |
+| 1NF（原子性）  | 字段不可再分     | 地址: "北京市海淀区#中关村" → 拆分为省、市、详细地址 | 避免数据冗余，但增加JOIN成本 |
+| 2NF（消除部分依赖） | 非主键字段完全依赖主键 | 订单表(订单ID,产品ID,产品价格) → 拆分为订单表+订单明细表 | 解决更新异常，但查询变复杂 |
+| 3NF（消除传递依赖） | 非主键字段无传递依赖 | 员工表(工号,部门,部门电话) → 拆分为员工表+部门表 | 减少数据冗余，需维护外键 |
+
+
 数据库审计
+
+| 审计项 | 记录内容示例                                | 风险场景     |
+| -------- | ------------------------------------------------- | ---------------- |
+| 登录尝试 | 用户: admin, IP: 192.168.1.100, 结果: 失败  | 暴力破解攻击 |
+| 数据查询 | SELECT * FROM users WHERE id=1;                   | 越权查看敏感信息 |
+| 数据变更 | UPDATE salary SET amount=99999 WHERE emp_id=1001; | 恶意篡改薪资 |
+| 结构变更 | DROP TABLE financial_data;                        | 破坏性操作  |
+
+| 系统级审计类型       | 记录内容                     |
+| ------------ | -------------------------------- |
+| 权限变更 | GRANT DBA TO user_x;             |
+| 配置修改 | ALTER SYSTEM SET audit_trail=DB; |
+| 备份恢复操作 | RMAN RESTORE DATABASE;           |
+
+
 
 数据库监控
 
-数据库函数
+| 维度   | 监控指标示例           | 业务影响         |
+| -------- | ---------------------------- | -------------------- |
+| 可用性 | 服务状态、连接成功率 | 宕机导致业务中断 |
+| 性能   | QPS、TPS、平均响应延迟 | 用户体验下降   |
+| 资源   | CPU、内存、磁盘I/O、网络流量 | 硬件瓶颈引发性能劣化 |
+| 数据安全 | 备份状态、日志归档延迟 | 数据丢失风险   |
 
-表结构设计
 
 
 <h2 id="Oracle">Oracle</h2>
@@ -441,15 +669,64 @@ innoDB
 
 各数据库特点/架构
 
+| 维度     | Oracle                | MySQL                    | OceanBase                      | GoldenDB                       |
+| ---------- | --------------------- | ------------------------ | ------------------------------ | ------------------------------ |
+| 架构模型 | 集中式/共享存储 | 单机/主从复制      | 原生分布式（LSM-Tree）  | 原生分布式（分片集群） |
+| 扩展性  | 垂直扩展（Scale-Up） | 有限水平扩展（分库分表） | 在线水平扩展（1:0.9线性比） | 动态分片扩容（哈希/范围分片）9|
+| 高可用  | RAC（多实例共享存储） | 主从复制（半同步） | Paxos多副本（RPO=0, RTO<30s） | gSync多活（异地容灾） |
+| 存储引擎 | 行存储（B-Tree） | InnoDB（B+Tree）       | LSM-Tree（高压缩）    | 行列混合（HTAP优化）9 |
+| 事务一致性 | 强一致（ACID）   | 强一致（ACID）      | 分布式强一致（全局事务） | 分布式强一致（透明二阶段提交） |
+
 数据导入/导出
+
+| 特性       | Oracle                           | MySQL                    | OceanBase                        | GoldenDB                       |
+| ------------ | -------------------------------- | ------------------------ | -------------------------------- | ------------------------------ |
+| 核心工具 | Data Pump (expdp/impdp)、EXP/IMP | mysqldump、mysql 命令 | ODC (OceanBase Developer Center) | dbtool、batchload.py          |
+| 支持格式 | DMP、SQL、CSV、PDE            | SQL、CSV                | SQL、CSV、ZIP                  | CSV、SQL                      |
+| 是否支持并行 | ✅ (Data Pump)                  | ❌ (需手动分片)    | ✅ (ODC 全局快照)           | ✅ (分片并行导入)       |
+| 大文件处理 | ✅ (表空间导出)            | ✅ (压缩导出)       | ✅ (文件自动切分)         | ✅ (分片存储)             |
+| 跨平台兼容性 | ✅ (DMP 二进制通用)        | ✅ (SQL 文本通用)   | ✅ (CSV/SQL 格式)             | ✅ (CSV 中介)               |
+| 典型场景 | 全库迁移、表空间迁移   | 中小规模备份、跨版本迁移 | 分布式环境数据同步、HTAP 负载 | 金融核心系统迁移、分片数据管理 |
 
 备份/恢复
 
+| 特性       | Oracle                        | MySQL                     | OceanBase                   | GoldenDB                     |
+| ------------ | ----------------------------- | ------------------------- | --------------------------- | ---------------------------- |
+| 核心备份工具 | Data Pump (expdp/impdp)、RMAN | mysqldump、xtrabackup    | ODC（图形化）、物理备份命令 | dbtool、restore.py          |
+| 备份类型 | 逻辑备份（DMP）、物理备份 | 逻辑备份（SQL）、物理备份 | 物理备份、逻辑备份 | 全量/增量备份、Binlog 日志 |
+| 恢复粒度 | 全库、表空间、表      | 全库、单库、单表  | 租户、库、表级别    | 分片（DN）、单库、单表 |
+| 关键特性 | 并行导出、加密、压缩 | 基于时间点恢复（Binlog） | 分布式一致性、异地备份 | 分片感知、活跃事务一致性处理 |
+
 高可用
+
+| 维度       | Oracle                         | MySQL                   | OceanBase            | GoldenDB                 |
+| ------------ | ------------------------------ | ----------------------- | -------------------- | ------------------------ |
+| 核心架构 | 共享存储 (RAC) + 逻辑复制 (DG) | 主从复制 + Paxos (MGR) | Paxos 多副本 + 仲裁 | 分片分组 (gTank) + gSync |
+| 数据一致性 | 强一致 (DG 最大可用模式) | 最终一致 → 强一致 (MGR) | 强一致 (多数派确认) | 强一致 (分片内)    |
+| 故障恢复速度 | RTO < 30秒 (RAC)              | RTO < 10秒 (MGR)       | RTO < 8秒           | RTO < 10秒 (分片切换) |
+| 容灾能力 | 跨机房 (DG)                 | 跨集群异步 (ClusterSet) | 三地五中心部署 | 本地/同城/异地三级架构 |
+| 适用场景 | 传统金融核心             | 互联网中型应用   | 分布式金融/HTAP 场景 | 银行核心系统迁移 |
 
 分布式
 
+| 维度     | Oracle                        | MySQL                      | OceanBase                   | GoldenDB               |
+| ---------- | ----------------------------- | -------------------------- | --------------------------- | ---------------------- |
+| 是否分布式 | ❌ 集中式（扩展方案伪分布式） | ❌ 单机（需分库分表） | ✅ 原生分布式         | ✅ 原生分布式    |
+| 实现方式 | RAC+Data Guard（共享存储） | 中间件（如ShardingSphere） | 多副本Paxos+LSM-Tree     | 分片集群+GTM事务管理器 |
+| 数据分片 | 表分区（非分布式）   | 手动分库分表         | 自动分区（HASH/RANGE） | 分片键路由（业务感知） |
+| 事务一致性 | 强一致（单机）         | 弱一致（主从延迟） | 强一致（Multi-Paxos）  | 强一致（2PC+GTM） |
+| 扩展性  | 垂直扩展（Scale-Up）    | 水平扩展（复杂）   | 在线水平扩展（1:0.9线性比） | 动态分片扩容     |
+| 典型场景 | 传统金融核心            | 中小Web应用            | 金融HTAP/高并发        | 银行核心系统迁移 |
+
 集群部署
+
+| 特性     | Oracle RAC         | MySQL PXC        | OceanBase             | GoldenDB            |
+| ---------- | ------------------ | ---------------- | --------------------- | ------------------- |
+| 架构本质 | 共享存储       | 多主同步复制 | 原生分布式多副本 | 分片集群 + 容器化 |
+| 数据一致性 | 强一致（单集群） | 强一致（多主） | 分布式强一致（Paxos） | 分片内强一致（GTM） |
+| 扩展性  | 垂直扩展       | 水平扩展（受限） | 在线水平扩展    | 动态分片裂变  |
+| 容灾粒度 | 节点级          | 节点级        | 机房/城市级      | 分片级           |
+| 部署复杂度 | 高（依赖共享存储） | 中（脚本化） | 中（ODC 工具辅助） | 低（云管平台集成） |
 
 
 <h2 id="VMWare/FC">VMWare/FC</h2> 
