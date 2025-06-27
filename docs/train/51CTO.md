@@ -617,27 +617,250 @@ oracle安装
 
 实例
 
+```text
+实例 = 内存结构（SGA） + 后台进程（Background Processes）
+作用：数据库运行时的临时环境，用于管理数据文件、处理用户请求。
+关键特性：
+一个实例同一时间只能挂载一个数据库（非CDB架构）。
+实例本身不存储数据，数据持久化在磁盘文件中（如 .dbf）。
+```
+| 组件                    | 功能说明                                                               |
+| ------------------------- | -------------------------------------------------------------------------- |
+| SGA (System Global Area)  | 共享内存区，含缓冲池（Buffer Cache）、共享池（Shared Pool）等 |
+| PGA (Program Global Area) | 私有内存区，每个会话独立（排序、哈希操作）            |
+| 后台进程              | DBWn（写数据文件）、LGWR（写Redo Log）、PMON（进程监控）、SMON（实例恢复） |
+
+```sql
+1、启动实例：
+SQL> STARTUP NOMOUNT;  -- 启动实例（未挂载数据库）  
+此时分配SGA，启动后台进程，但未关联任何数据文件。
+2、挂载数据库：
+SQL> ALTER DATABASE MOUNT;  -- 关联控制文件  
+SQL> ALTER DATABASE OPEN;   -- 打开数据文件  
+3、查看实例状态：
+SQL> SELECT instance_name, status FROM v$instance;  
+4、输出：
+INSTANCE_NAME    STATUS  
+---------------- ------------  
+orcl             OPEN  
+```
+
 租户
+
+```text
+多租户架构（Multitenant） 从 Oracle 12c 引入，将传统数据库拆分为：
+CDB（Container Database）：容器数据库，承载多个租户。
+PDB（Pluggable Database）：可插拔数据库，每个PDB是一个独立租户。
+```
+
+| 概念   | 说明                                                               |
+| -------- | -------------------------------------------------------------------- |
+| CDB      | 根容器（CDB$ROOT） + 多个PDB，管理公共资源（如Undo表空间、Redo日志） |
+| PDB      | 业务数据库，拥有独立的数据文件、用户、表空间（如 sales_pdb） |
+| 应用容器 | 可选层，将多个PDB分组（如 hr_app 容器包含 hr_pdb1、hr_pdb2） |
+
+```sql
+1、创建CDB：
+CREATE DATABASE cdb01  
+  ENABLE PLUGGABLE DATABASE  
+  ADMIN USER cdb_admin IDENTIFIED BY password;  
+2、创建PDB租户：
+-- 创建订单库PDB  
+CREATE PLUGGABLE DATABASE orders_pdb  
+  ADMIN USER orders_admin IDENTIFIED BY password  
+  FILE_NAME_CONVERT = ('/pdbseed/', '/orders_pdb/');  
+  
+-- 创建用户库PDB  
+CREATE PLUGGABLE DATABASE users_pdb  
+  ADMIN USER users_admin IDENTIFIED BY password  
+  FILE_NAME_CONVERT = ('/pdbseed/', '/users_pdb/');  
+3、切换租户：
+-- 连接到CDB根容器  
+SQL> ALTER SESSION SET CONTAINER = cdb$root;  
+  
+-- 切换到orders_pdb租户  
+SQL> ALTER SESSION SET CONTAINER = orders_pdb;  
+4、查看租户信息：
+SELECT name, open_mode FROM v$pdbs;  
+5、输出：
+NAME       OPEN_MODE  
+---------- ----------  
+ORDERS_PDB READ WRITE  
+USERS_PDB  MOUNTED    -- 未打开  
+```
 
 会话
 
+| 场景         | 会话概念     | 电话客服类比 |
+| -------------- | ---------------- | ------------------ |
+| 用户连接数据库 | 新建会话     | 客户拨通电话 |
+| 执行SQL查询 | 会话活跃中  | 客服处理业务 |
+| 半小时不操作 | 会话闲置（IDLE） | 客户沉默，客服等待 |
+| 管理员踢人 | 终止会话     | 主管强制挂断电话 |
+| 用户退出   | 会话正常结束 | 客户说“谢谢”后挂机 |
+
+```sql
+-- 查看所有会话（像客服中心监控大屏）
+SELECT sid, serial#, username, status FROM v$session;
+
+-- 踢掉卡住的会话（像主管强制挂断电话）
+ALTER SYSTEM KILL SESSION '123,456';  -- 123是会话ID,456是序列号
+
+-- 限制通话时长（设置自动挂断）
+ALTER PROFILE default LIMIT IDLE_TIME 30;  -- 30分钟无操作自动断线
+```
+
+
 表空间
+
+| 衣柜结构 | 对应表空间概念 | 作用说明                   |
+| ------------ | --------------------- | ------------------------------ |
+| 整个衣柜 | 数据库（Database） | 容纳所有物品的大家具 |
+| 分层抽屉 | 表空间（Tablespace） | 核心！ 分类存储不同物品 |
+| 抽屉里的格子 | 数据文件（Data File） | 实际存放衣服的空间（硬盘文件） |
+| 衣服/裤子 | 表（Table）        | 具体数据                   |
+
+```text
+🔧 为什么需要表空间？（衣柜的妙用）
+
+分类管理
+👔 上衣抽屉：存放 用户表（比如 USER_DATA 表空间）
+👖 裤子抽屉：存放 系统表（比如 SYSTEM 表空间）
+🧦 内衣抽屉：存放 临时数据（比如 TEMP 表空间）
+—— 避免袜子混进西装堆！
+性能优化
+把常穿的 当季衣服 放在容易拿的抽屉（表空间放 高速SSD）
+过季衣服塞到顶层抽屉（表空间放 普通HDD）
+安全隔离
+贵重手表锁进 带锁抽屉（加密表空间 ENCRYPTION=ON）
+孩子不能打开父母抽屉（不同用户访问不同表空间）
+```
+
+```sql
+1. 创建表空间（加个新抽屉）
+-- 创建一个叫「照片抽屉」的表空间（自动扩展+存放照片）
+CREATE TABLESPACE photo_drawer 
+  DATAFILE '/u01/oradata/photo01.dbf' SIZE 100M 
+  AUTOEXTEND ON NEXT 50M;
+2. 把表放进表空间（衣服入抽屉）
+-- 创建「家庭相册」表，存到 photo_drawer 表空间
+CREATE TABLE family_photos (
+  id    NUMBER,
+  photo BLOB
+) TABLESPACE photo_drawer;  -- 指定抽屉！
+3. 爆仓预警（抽屉满了怎么办？）
+-- 查看表空间使用率（像检查抽屉剩余空间）
+SELECT tablespace_name, 
+       used_percent "已用%"
+FROM dba_tablespace_usage_metrics;
+
+-- 扩容抽屉：给 photo_drawer 增加一个格子（数据文件）
+ALTER TABLESPACE photo_drawer 
+  ADD DATAFILE '/u02/oradata/photo02.dbf' SIZE 200M;
+```
+
 
 权限分配
 
 UNDO/REDO
 
+| 功能   | REDO 日志                  | UNDO 日志                  |
+| -------- | ---------------------------- | ---------------------------- |
+| 本质   | 操作流水账              | 数据旧照备份           |
+| 目的   | 防数据丢失（持久性） | 回滚+读一致性（隔离性） |
+| 内容   | 物理操作（如“XX位置写YY值”） | 逻辑旧值（如“余额原为1000”） |
+| 是否可删 | 归档后可清理           | 事务提交后延迟清理  |
+
+
 ASM
+
 
 归档
 
+```bash
+Oracle中的归档（Archiving） 是指将写满的重做日志文件（Redo Log）备份保存的过程，是数据库实现完整恢复和连续运行的核心机制。以下是关键要点：
+
+归档的核心作用
+
+# 数据恢复保障
+允许数据库恢复到任意时间点（包括日志切换后的历史操作）
+# 持续运行支持
+避免重做日志写满后数据库挂起（归档释放日志文件可重用）
+# 备份基础
+所有物理备份（RMAN）依赖归档日志实现完全恢复
+```
+
+| 特性   | 归档模式 (ARCHIVELOG)  | 非归档模式 (NOARCHIVELOG) |
+| -------- | -------------------------- | ------------------------- |
+| 日志处理 | 写满的日志备份后标记可重用 | 日志写满后直接覆盖 |
+| 恢复能力 | 支持时间点恢复（PITR） | 仅能恢复到上次备份时刻 |
+| 可用性 | 日志写满不阻塞数据库 | 日志循环写满后数据库挂起 |
+| 适用场景 | 生产环境（7x24小时运行） | 测试/开发环境       |
+
 视图
+
+在Oracle数据库中，视图（View） 是基于一个或多个表的查询结果集生成的虚拟表，不存储实际数据，而是通过SQL查询动态生成数据。
+
+| 特性   | 视图                         | 表          |
+| -------- | ------------------------------ | ------------ |
+| 存储数据 | ❌ 虚拟                     | ✅ 物理存储 |
+| 更新限制 | 部分可更新                | 完全可更新 |
+| 性能   | 依赖基表查询性能       | 直接访问更快 |
+| 索引   | 不可直接建索引（物化视图除外） | 支持索引 |
+
 
 位图
 
 段与区管理机制
 
+```mermaid
+graph TD
+    A[表空间 Tablespace] --> B[段 Segment]
+    B --> C[区 Extent]
+    C --> D[数据块 Block]
+```
+
+```text
+表空间（Tablespace）：逻辑存储容器（如USERS表空间）
+段（Segment）：存储特定对象的所有数据（如表、索引段）
+区（Extent）：由连续数据块组成的物理存储单元
+数据块（Block）：最小I/O单元（通常8KB）
+```
+
 RMAN
+
+```sql
+1、完全恢复（介质故障）
+-- 步骤1：挂载数据库
+STARTUP MOUNT;
+-- 步骤2：恢复数据文件
+RESTORE DATABASE;
+-- 步骤3：应用归档日志
+RECOVER DATABASE;
+-- 步骤4：打开数据库
+ALTER DATABASE OPEN;
+
+2. 时间点恢复（PITR - 误删表）
+RUN {
+  SET UNTIL TIME "to_date('2024-06-26 14:00:00','yyyy-mm-dd hh24:mi:ss')";
+  RESTORE DATABASE;
+  RECOVER DATABASE;
+}
+ALTER DATABASE OPEN RESETLOGS;  -- 必须重置日志
+
+3. 单表恢复（12c+）
+-- 将表恢复到指定时间点（无需全库恢复）
+RECOVER TABLE scott.employees 
+  UNTIL TIME '2024-06-26 14:00:00'
+  AUXILIARY DESTINATION '/tmp';
+```
+| 能力   | RMAN                   | expdp/impdp      | OS拷贝 |
+| -------- | ---------------------- | ---------------- | -------- |
+| 备份类型 | 物理备份（块级） | 逻辑备份（行级） | 物理备份 |
+| 增量备份 | ✅ 块级增量       | ❌              | ❌      |
+| 恢复粒度 | 数据库/表空间/数据文件 | 全库/表       | 仅全库 |
+| 断点续传 | ✅                    | ❌              | ❌      |
+| 压缩加密 | ✅                    | ✅ (部分)     | ❌      |
 
 导入导出工具
 
@@ -664,6 +887,16 @@ DG备库同步机制
 <h2 id="Mysql">Mysql</h2> 
 
 innoDB
+```mermaid
+graph LR
+    A[客户端SQL] --> B[SQL接口]
+    B --> C[查询优化器]
+    C --> D[存储引擎层]
+    D -->|读写| E[缓冲池 Buffer Pool]
+    E -->|刷脏| F[磁盘数据文件 .ibd]
+    D -->|日志| G[Redo Log]
+    D -->|回滚| H[Undo Log]
+```
 
 <h2 id="国产改造">国产改造</h2> 
 
@@ -674,7 +907,7 @@ innoDB
 | 架构模型 | 集中式/共享存储 | 单机/主从复制      | 原生分布式（LSM-Tree）  | 原生分布式（分片集群） |
 | 扩展性  | 垂直扩展（Scale-Up） | 有限水平扩展（分库分表） | 在线水平扩展（1:0.9线性比） | 动态分片扩容（哈希/范围分片）9|
 | 高可用  | RAC（多实例共享存储） | 主从复制（半同步） | Paxos多副本（RPO=0, RTO<30s） | gSync多活（异地容灾） |
-| 存储引擎 | 行存储（B-Tree） | InnoDB（B+Tree）       | LSM-Tree（高压缩）    | 行列混合（HTAP优化）9 |
+| 存储引擎 | 行存储（B-Tree） | InnoDB（B+Tree）       | LSM-Tree（高压缩）    | 行列混合（HTAP优化） |
 | 事务一致性 | 强一致（ACID）   | 强一致（ACID）      | 分布式强一致（全局事务） | 分布式强一致（透明二阶段提交） |
 
 数据导入/导出
