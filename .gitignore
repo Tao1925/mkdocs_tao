@@ -3,3 +3,5 @@
 /site
 docker_deploy/deploy.env
 docker_deploy/update.log
+__pycache__
+*.pyc
