@@ -2,7 +2,7 @@
 
 ## 一、方案目标
 
-基于 [docs/proj/fbd_ai/plan.md](docs/proj/fbd_ai/plan.md) 的思路，先做一个最小可运行版本，只解决下面两件事。
+基于 [plan.md](plan.md) 的思路，先做一个最小可运行版本，只解决下面两件事。
 
 1. 在本地离线环境中，用 CPU 跑一个通用小模型。
 2. 写一个 Python 脚本，输入一条病毒告警日志，输出“更像误报还是更像真实威胁”的结果，并给出简短分析。
@@ -34,9 +34,9 @@
 
 本次最小实现的脚本在这里。
 
-- [docs/proj/fbd_ai/script/analyze_av_alert.py](docs/proj/fbd_ai/script/analyze_av_alert.py)
+- [script/analyze_av_alert.py](script/analyze_av_alert.py)
 
-这个脚本默认调用本机 `http://127.0.0.1:11434` 的 Ollama 服务，并默认使用模型 `qwen2.5:3b`。
+这个脚本默认调用本机 `http://127.0.0.1:11434` 的 Ollama 服务，并默认使用模型 `qwen3.5:4b`。
 
 如果本地模型暂时不可用，脚本会自动退回到规则模式，仍然给出一个保守的初步结果。
 
@@ -94,6 +94,12 @@
 python docs/proj/fbd_ai/script/analyze_av_alert.py --show-example > sample_alert.json
 ```
 
+Linux 下通常使用 `python3`。
+
+```bash
+python3 docs/proj/fbd_ai/script/analyze_av_alert.py --show-example > sample_alert.json
+```
+
 生成后的示例内容大致如下。
 
 ```json
@@ -136,7 +142,7 @@ python docs/proj/fbd_ai/script/analyze_av_alert.py --show-example > sample_alert
 
 如果你的内网不能联网，建议采用“外网审批下载 + 离线介质导入”的方式，把 Ollama 安装包和模型文件导入内网。
 
-安装完成后，先启动服务。
+Windows 下安装完成后，先启动服务。
 
 ```powershell
 ollama serve
@@ -146,6 +152,28 @@ ollama serve
 
 ```powershell
 ollama list
+```
+
+Linux 下如果可以通过审批联网安装，常见做法如下。
+
+```bash
+curl -fsSL https://ollama.com/install.sh | sh
+sudo systemctl enable --now ollama
+systemctl status ollama --no-pager
+ollama list
+```
+
+如果 Linux 主机没有 systemd，或者你只是临时验证，也可以直接前台启动。
+
+```bash
+ollama serve
+```
+
+如果是离线导入二进制，至少要保证 `ollama` 可执行文件已经放入系统路径，例如。
+
+```bash
+sudo install -m 755 ./ollama /usr/local/bin/ollama
+ollama --version
 ```
 
 ### 步骤 2：准备一个本地 CPU 小模型
@@ -164,7 +192,33 @@ ollama list
 - 编写 `Modelfile`
 - 使用 `ollama create` 生成本地模型
 
-如果你已经有一个名字为 `qwen2.5:3b` 的本地模型，可以直接跳过这一步。
+Windows 下可以先编写一个最小 `Modelfile`。
+
+```text
+FROM ./qwen2.5-3b-instruct-q4_k_m.gguf
+PARAMETER temperature 0.1
+SYSTEM 你是一名内网防病毒告警分析助手。
+```
+
+```powershell
+ollama create qwen-av:3b -f .\Modelfile
+ollama list
+```
+
+Linux 下命令类似。
+
+```bash
+cat > Modelfile <<'EOF'
+FROM ./qwen2.5-3b-instruct-q4_k_m.gguf
+PARAMETER temperature 0.1
+SYSTEM 你是一名内网防病毒告警分析助手。
+EOF
+
+ollama create qwen-av:3b -f ./Modelfile
+ollama list
+```
+
+如果你已经有一个可用的本地模型，例如 `qwen2.5:3b` 或 `qwen-av:3b`，可以直接跳过这一步。
 
 ### 步骤 3：准备一条病毒告警输入
 
@@ -172,6 +226,10 @@ ollama list
 
 ```powershell
 python docs/proj/fbd_ai/script/analyze_av_alert.py --show-example > sample_alert.json
+```
+
+```bash
+python3 docs/proj/fbd_ai/script/analyze_av_alert.py --show-example > sample_alert.json
 ```
 
 然后根据你真实的病毒告警，把 `sample_alert.json` 里的字段替换掉。
@@ -193,16 +251,36 @@ python docs/proj/fbd_ai/script/analyze_av_alert.py --show-example > sample_alert
 python docs/proj/fbd_ai/script/analyze_av_alert.py --input sample_alert.json --model qwen3.5:4b
 ```
 
+Linux 下对应命令如下。
+
+```bash
+python3 docs/proj/fbd_ai/script/analyze_av_alert.py --input sample_alert.json --model qwen3.5:4b
+```
+
 如果你想先不接模型，只验证规则流程，可以执行。
 
 ```powershell
 python docs/proj/fbd_ai/script/analyze_av_alert.py --input sample_alert.json --rule-only
 ```
 
+```bash
+python3 docs/proj/fbd_ai/script/analyze_av_alert.py --input sample_alert.json --rule-only
+```
+
 如果你改用了更小的模型，比如 `qwen2.5:1.5b`，则命令如下。
 
 ```powershell
 python docs/proj/fbd_ai/script/analyze_av_alert.py --input sample_alert.json --model qwen2.5:1.5b
+```
+
+```bash
+python3 docs/proj/fbd_ai/script/analyze_av_alert.py --input sample_alert.json --model qwen2.5:1.5b
+```
+
+如果你希望把结果保存为文件，Linux 下可以直接配合 `tee`。
+
+```bash
+python3 docs/proj/fbd_ai/script/analyze_av_alert.py --input sample_alert.json --model qwen3.5:4b | tee result.json
 ```
 
 ### 步骤 5：查看结果
